@@ -5,7 +5,7 @@
  * @description 实现了内部自动批处理机制，优雅地处理 Cloudflare 的子请求限制。
  * API 现在可以处理任何长度的文本，不会因为"子请求过多"而失败。
  * 这是最终的生产就绪版本。
- * 
+ *
  * @features
  * - 支持流式和非流式 TTS 输出
  * - 自动文本清理和分块处理
@@ -25,14 +25,21 @@ const API_KEY = globalThis.API_KEY;
 const DEFAULT_CONCURRENCY = 10; // 现在作为批处理大小使用
 const DEFAULT_CHUNK_SIZE = 300; // 默认文本分块大小
 
-// OpenAI 语音映射到 Microsoft 语音
+// OpenAI 语音映射到 Microsoft 语音（13 个官方 voice 全覆盖）
 const OPENAI_VOICE_MAP = {
-  "shimmer": "zh-CN-XiaoxiaoNeural",    // 温柔女声 -> 晓晓
-  "alloy": "zh-CN-YunyangNeural",       // 专业男声 -> 云扬  
-  "fable": "zh-CN-YunjianNeural",       // 激情男声 -> 云健
-  "onyx": "zh-CN-XiaoyiNeural",         // 活泼女声 -> 晓伊
-  "nova": "zh-CN-YunxiNeural",          // 阳光男声 -> 云希
-  "echo": "zh-CN-liaoning-XiaobeiNeural" // 东北女声 -> 晓北
+  alloy: 'zh-CN-YunyangNeural', // 中性流畅   -> 云扬（专业新闻男声）
+  ash: 'zh-CN-YunxiNeural', // 清晰专业   -> 云希（阳光清晰男声）
+  ballad: 'zh-CN-XiaohanNeural', // 柔和抒情   -> 晓涵（柔美知性女声）
+  cedar: 'zh-CN-XiaoqiuNeural', // 沉稳自然   -> 晓秋（成熟沉稳女声）
+  coral: 'zh-CN-XiaoxiaoNeural', // 温暖亲切   -> 晓晓（温柔亲切女声）
+  echo: 'zh-CN-liaoning-XiaobeiNeural', // 磁性深沉   -> 晓北（磁性东北女声）
+  fable: 'zh-CN-YunjianNeural', // 表现力强   -> 云健（激情演讲男声）
+  marin: 'zh-CN-XiaoyanNeural', // 清新明亮   -> 晓颜（清新活泼女声）
+  nova: 'zh-CN-XiaoyiNeural', // 活泼年轻   -> 晓伊（活泼年轻女声）
+  onyx: 'zh-CN-YunzeNeural', // 低沉有力   -> 云泽（低沉厚重男声）
+  sage: 'zh-CN-XiaoxuanNeural', // 冷静理性   -> 晓萱（冷静理性女声）
+  shimmer: 'zh-CN-XiaoruiNeural', // 轻柔细腻   -> 晓睿（轻柔细腻女声）
+  verse: 'zh-CN-XiaomoNeural' // 多变表现力 -> 晓墨（多变富表现力女声）
 };
 
 let htmlContent = null; // 懒初始化，避免冷启动时占用内存
@@ -41,7 +48,7 @@ let htmlContent = null; // 懒初始化，避免冷启动时占用内存
 // 主事件监听器
 // =================================================================================
 
-addEventListener("fetch", event => {
+addEventListener('fetch', event => {
   event.respondWith(handleRequest(event));
 });
 
@@ -54,7 +61,7 @@ async function handleRequest(event) {
   const request = event.request;
 
   // 处理 CORS 预检请求
-  if (request.method === "OPTIONS") return handleOptions(request);
+  if (request.method === 'OPTIONS') return handleOptions(request);
 
   const url = new URL(request.url);
   // 处理HTML页面请求
@@ -62,33 +69,36 @@ async function handleRequest(event) {
     if (!htmlContent) htmlContent = getHtmlContent();
     return new Response(htmlContent, {
       headers: {
-        "Content-Type": "text/html;charset=UTF-8",
-        "Cache-Control": "public, max-age=86400" // 缓存1d
+        'Content-Type': 'text/html;charset=UTF-8',
+        'Cache-Control': 'public, max-age=86400' // 缓存1d
       }
     });
   }
 
   // API 密钥验证
   if (API_KEY) {
-    const authHeader = request.headers.get("authorization");
-    if (!authHeader || !authHeader.startsWith("Bearer ") || authHeader.slice(7) !== API_KEY) {
-      return errorResponse("无效的 API 密钥", 401, "invalid_api_key");
+    const authHeader = request.headers.get('authorization');
+    if (
+      !authHeader ||
+      !authHeader.startsWith('Bearer ') ||
+      authHeader.slice(7) !== API_KEY
+    ) {
+      return errorResponse('无效的 API 密钥', 401, 'invalid_api_key');
     }
   }
 
-
   try {
     // 路由分发
-    if (url.pathname === "/v1/audio/speech") return await handleSpeechRequest(request);
-    if (url.pathname === "/v1/models") return handleModelsRequest();
+    if (url.pathname === '/v1/audio/speech')
+      return await handleSpeechRequest(request);
+    if (url.pathname === '/v1/models') return handleModelsRequest();
   } catch (err) {
-    console.error("请求处理器错误:", err);
-    return errorResponse(err.message, 500, "internal_server_error");
+    console.error('请求处理器错误:', err);
+    return errorResponse(err.message, 500, 'internal_server_error');
   }
 
-  return errorResponse("未找到", 404, "not_found");
+  return errorResponse('未找到', 404, 'not_found');
 }
-
 
 // =================================================================================
 // 路由处理器
@@ -100,7 +110,9 @@ async function handleRequest(event) {
  * @returns {Response} CORS 响应
  */
 function handleOptions(request) {
-  const headers = makeCORSHeaders(request.headers.get("Access-Control-Request-Headers"));
+  const headers = makeCORSHeaders(
+    request.headers.get('Access-Control-Request-Headers')
+  );
   return new Response(null, { status: 204, headers });
 }
 
@@ -110,38 +122,38 @@ function handleOptions(request) {
  * @returns {Promise<Response>} 语音数据响应
  */
 async function handleSpeechRequest(request) {
-  if (request.method !== "POST") {
-    return errorResponse("不允许的方法", 405, "method_not_allowed");
+  if (request.method !== 'POST') {
+    return errorResponse('不允许的方法', 405, 'method_not_allowed');
   }
 
   const requestBody = await request.json();
   if (!requestBody.input) {
-    return errorResponse("'input' 是必需参数", 400, "invalid_request_error");
+    return errorResponse("'input' 是必需参数", 400, 'invalid_request_error');
   }
 
   // 解析请求参数并设置默认值
   const {
-    model = "tts-1",                     // 模型名称
-    input,                               // 输入文本
-    voice = null,                        // 语音（OpenAI 别名或微软语音名）
-    response_format = "mp3",             // 输出格式
-    speed = 1.0,                         // 语速 (0.25-2.0)
-    pitch = 1.0,                         // 音调 (0.5-1.5)
-    style = "general",                   // 语音风格
-    stream = false,                      // 是否流式输出
-    concurrency = DEFAULT_CONCURRENCY,   // 并发数
-    chunk_size = DEFAULT_CHUNK_SIZE,     // 分块大小
-    cleaning_options = {}                // 文本清理选项
+    model = 'tts-1', // 模型名称
+    input, // 输入文本
+    voice = null, // 语音（OpenAI 别名或微软语音名）
+    response_format = 'mp3', // 输出格式
+    speed = 1.0, // 语速 (0.25-2.0)
+    pitch = 1.0, // 音调 (0.5-1.5)
+    style = 'general', // 语音风格
+    stream = false, // 是否流式输出
+    concurrency = DEFAULT_CONCURRENCY, // 并发数
+    chunk_size = DEFAULT_CHUNK_SIZE, // 分块大小
+    cleaning_options = {} // 文本清理选项
   } = requestBody;
 
   // 合并默认清理选项
   const finalCleaningOptions = {
-    remove_markdown: true,      // 移除 Markdown
-    remove_emoji: true,         // 移除 Emoji
-    remove_urls: true,          // 移除 URL
-    remove_line_breaks: true,   // 移除换行符
+    remove_markdown: true, // 移除 Markdown
+    remove_emoji: true, // 移除 Emoji
+    remove_urls: true, // 移除 URL
+    remove_line_breaks: true, // 移除换行符
     remove_citation_numbers: true, // 移除引用数字
-    custom_keywords: "",        // 自定义关键词
+    custom_keywords: '', // 自定义关键词
     ...cleaning_options
   };
 
@@ -150,19 +162,21 @@ async function handleSpeechRequest(request) {
 
   // 语音映射：voice 别名 > model 中编码的别名 > voice 直接作为微软语音名 > 默认值
   const modelAlias = model.replace(/^tts-1-?/, '') || null;
-  const finalVoice = OPENAI_VOICE_MAP[voice]
-    || OPENAI_VOICE_MAP[modelAlias]
-    || voice
-    || "zh-CN-XiaoxiaoNeural";
+  const finalVoice =
+    OPENAI_VOICE_MAP[voice] ||
+    OPENAI_VOICE_MAP[modelAlias] ||
+    voice ||
+    'zh-CN-XiaoxiaoNeural';
 
   // response_format -> 微软 outputFormat + Content-Type
   const FORMAT_MAP = {
-    "mp3":  { fmt: "audio-24khz-48kbitrate-mono-mp3",  ct: "audio/mpeg" },
-    "opus": { fmt: "webm-24khz-16bit-mono-opus",        ct: "audio/webm" },
-    "wav":  { fmt: "riff-24khz-16bit-mono-pcm",         ct: "audio/wav"  },
-    "pcm":  { fmt: "raw-24khz-16bit-mono-pcm",          ct: "audio/pcm"  },
+    mp3: { fmt: 'audio-24khz-48kbitrate-mono-mp3', ct: 'audio/mpeg' },
+    opus: { fmt: 'webm-24khz-16bit-mono-opus', ct: 'audio/webm' },
+    wav: { fmt: 'riff-24khz-16bit-mono-pcm', ct: 'audio/wav' },
+    pcm: { fmt: 'raw-24khz-16bit-mono-pcm', ct: 'audio/pcm' }
   };
-  const { fmt: outputFormat, ct: contentType } = FORMAT_MAP[response_format] ?? FORMAT_MAP["mp3"];
+  const { fmt: outputFormat, ct: contentType } =
+    FORMAT_MAP[response_format] ?? FORMAT_MAP['mp3'];
 
   // 参数转换为 Microsoft TTS 格式
   const rate = ((speed - 1) * 100).toFixed(0);
@@ -187,8 +201,13 @@ async function handleSpeechRequest(request) {
 function handleModelsRequest() {
   const CREATED_AT = 1706745600; // 固定 Unix 时间戳（秒），符合 OpenAI 规范
   const models = [
-    { id: 'tts-1',    object: 'model', created: CREATED_AT, owned_by: 'openai' },
-    { id: 'tts-1-hd', object: 'model', created: CREATED_AT, owned_by: 'openai' },
+    { id: 'tts-1', object: 'model', created: CREATED_AT, owned_by: 'openai' },
+    {
+      id: 'tts-1-hd',
+      object: 'model',
+      created: CREATED_AT,
+      owned_by: 'openai'
+    },
     ...Object.keys(OPENAI_VOICE_MAP).map(v => ({
       id: `tts-1-${v}`,
       object: 'model',
@@ -196,8 +215,8 @@ function handleModelsRequest() {
       owned_by: 'openai'
     }))
   ];
-  return new Response(JSON.stringify({ object: "list", data: models }), {
-    headers: { "Content-Type": "application/json", ...makeCORSHeaders() }
+  return new Response(JSON.stringify({ object: 'list', data: models }), {
+    headers: { 'Content-Type': 'application/json', ...makeCORSHeaders() }
   });
 }
 
@@ -216,10 +235,14 @@ function handleModelsRequest() {
 function streamVoice(textChunks, concurrency, contentType, ...ttsArgs) {
   const { readable, writable } = new TransformStream();
   // 不 await——立即返回 Response，pipe 在后台并发执行
-  pipeChunksToStream(writable.getWriter(), textChunks, concurrency, ...ttsArgs)
-    .catch(err => console.error("流式 TTS 失败:", err));
+  pipeChunksToStream(
+    writable.getWriter(),
+    textChunks,
+    concurrency,
+    ...ttsArgs
+  ).catch(err => console.error('流式 TTS 失败:', err));
   return new Response(readable, {
-    headers: { "Content-Type": contentType, ...makeCORSHeaders() }
+    headers: { 'Content-Type': contentType, ...makeCORSHeaders() }
   });
 }
 
@@ -235,7 +258,9 @@ async function pipeChunksToStream(writer, chunks, concurrency, ...ttsArgs) {
     // 分批处理文本块以避免超出 Cloudflare 子请求限制
     for (let i = 0; i < chunks.length; i += concurrency) {
       const batch = chunks.slice(i, i + concurrency);
-      const audioPromises = batch.map(chunk => getAudioChunk(chunk, ...ttsArgs));
+      const audioPromises = batch.map(chunk =>
+        getAudioChunk(chunk, ...ttsArgs)
+      );
 
       // 仅等待当前批次完成
       const audioBlobs = await Promise.all(audioPromises);
@@ -247,7 +272,7 @@ async function pipeChunksToStream(writer, chunks, concurrency, ...ttsArgs) {
       }
     }
   } catch (error) {
-    console.error("流式 TTS 失败:", error);
+    console.error('流式 TTS 失败:', error);
     writer.abort(error);
     throw error;
   } finally {
@@ -269,7 +294,9 @@ async function getVoice(textChunks, concurrency, contentType, ...ttsArgs) {
     // 非流式模式也使用批处理
     for (let i = 0; i < textChunks.length; i += concurrency) {
       const batch = textChunks.slice(i, i + concurrency);
-      const audioPromises = batch.map(chunk => getAudioChunk(chunk, ...ttsArgs));
+      const audioPromises = batch.map(chunk =>
+        getAudioChunk(chunk, ...ttsArgs)
+      );
 
       // 等待当前批次并收集结果
       const audioBlobs = await Promise.all(audioPromises);
@@ -279,11 +306,11 @@ async function getVoice(textChunks, concurrency, contentType, ...ttsArgs) {
     // 合并所有音频数据
     const concatenatedAudio = new Blob(allAudioBlobs, { type: contentType });
     return new Response(concatenatedAudio, {
-      headers: { "Content-Type": contentType, ...makeCORSHeaders() }
+      headers: { 'Content-Type': contentType, ...makeCORSHeaders() }
     });
   } catch (error) {
-    console.error("非流式 TTS 失败:", error);
-    return errorResponse(error.message, 500, "tts_generation_error");
+    console.error('非流式 TTS 失败:', error);
+    return errorResponse(error.message, 500, 'tts_generation_error');
   }
 }
 
@@ -297,30 +324,38 @@ async function getVoice(textChunks, concurrency, contentType, ...ttsArgs) {
  * @param {string} outputFormat - 输出格式
  * @returns {Promise<Blob>} 音频 Blob
  */
-async function getAudioChunk(text, voiceName, rate, pitch, style, outputFormat) {
+async function getAudioChunk(
+  text,
+  voiceName,
+  rate,
+  pitch,
+  style,
+  outputFormat
+) {
   const endpoint = await getEndpoint();
   const url = `https://${endpoint.r}.tts.speech.microsoft.com/cognitiveservices/v1`;
   const ssml = getSsml(text, voiceName, rate, pitch, style);
 
   const response = await fetch(url, {
-    method: "POST",
+    method: 'POST',
     headers: {
-      "Authorization": endpoint.t,
-      "Content-Type": "application/ssml+xml",
-      "User-Agent": "okhttp/4.5.0",
-      "X-Microsoft-OutputFormat": outputFormat
+      Authorization: endpoint.t,
+      'Content-Type': 'application/ssml+xml',
+      'User-Agent': 'okhttp/4.5.0',
+      'X-Microsoft-OutputFormat': outputFormat
     },
     body: ssml
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`Edge TTS API 错误: ${response.status} ${response.statusText} - ${errorText}`);
+    throw new Error(
+      `Edge TTS API 错误: ${response.status} ${response.statusText} - ${errorText}`
+    );
   }
 
   return response.blob();
 }
-
 
 // =================================================================================
 // 稳定的身份验证与辅助函数
@@ -338,28 +373,32 @@ async function getEndpoint() {
   const now = Date.now() / 1000;
 
   // 检查 Token 是否仍然有效
-  if (tokenInfo.token && tokenInfo.expiredAt &&
-    now < tokenInfo.expiredAt - TOKEN_REFRESH_BEFORE_EXPIRY) {
+  if (
+    tokenInfo.token &&
+    tokenInfo.expiredAt &&
+    now < tokenInfo.expiredAt - TOKEN_REFRESH_BEFORE_EXPIRY
+  ) {
     return tokenInfo.endpoint;
   }
 
-  const endpointUrl = "https://dev.microsofttranslator.com/apps/endpoint?api-version=1.0";
-  const clientId = crypto.randomUUID().replace(/-/g, "");
+  const endpointUrl =
+    'https://dev.microsofttranslator.com/apps/endpoint?api-version=1.0';
+  const clientId = crypto.randomUUID().replace(/-/g, '');
 
   try {
     const response = await fetch(endpointUrl, {
-      method: "POST",
+      method: 'POST',
       headers: {
-        "Accept-Language": "zh-Hans",
-        "X-ClientVersion": "4.0.530a 5fe1dc6c",
-        "X-UserId": "0f04d16a175c411e",
-        "X-HomeGeographicRegion": "zh-Hans-CN",
-        "X-ClientTraceId": clientId,
-        "X-MT-Signature": await sign(endpointUrl),
-        "User-Agent": "okhttp/4.5.0",
-        "Content-Type": "application/json; charset=utf-8",
-        "Content-Length": "0",
-        "Accept-Encoding": "gzip"
+        'Accept-Language': 'zh-Hans',
+        'X-ClientVersion': '4.0.530a 5fe1dc6c',
+        'X-UserId': '0f04d16a175c411e',
+        'X-HomeGeographicRegion': 'zh-Hans-CN',
+        'X-ClientTraceId': clientId,
+        'X-MT-Signature': await sign(endpointUrl),
+        'User-Agent': 'okhttp/4.5.0',
+        'Content-Type': 'application/json; charset=utf-8',
+        'Content-Length': '0',
+        'Accept-Encoding': 'gzip'
       }
     });
 
@@ -370,7 +409,7 @@ async function getEndpoint() {
     const data = await response.json();
 
     // 解析 JWT Token 获取过期时间
-    const jwt = data.t.split(".")[1];
+    const jwt = data.t.split('.')[1];
     const decodedJwt = JSON.parse(atob(jwt));
 
     // 更新 Token 缓存
@@ -380,14 +419,16 @@ async function getEndpoint() {
       expiredAt: decodedJwt.exp
     };
 
-    console.log(`成功获取新 Token，有效期 ${((decodedJwt.exp - now) / 60).toFixed(1)} 分钟`);
+    console.log(
+      `成功获取新 Token，有效期 ${((decodedJwt.exp - now) / 60).toFixed(1)} 分钟`
+    );
     return data;
   } catch (error) {
-    console.error("获取端点失败:", error);
+    console.error('获取端点失败:', error);
 
     // 如果有缓存的 Token，使用过期的 Token 作为备用
     if (tokenInfo.token) {
-      console.log("使用过期的缓存 Token 作为备用");
+      console.log('使用过期的缓存 Token 作为备用');
       return tokenInfo.endpoint;
     }
 
@@ -401,16 +442,20 @@ async function getEndpoint() {
  * @returns {Promise<string>} 签名字符串
  */
 async function sign(urlStr) {
-  const url = urlStr.split("://")[1];
+  const url = urlStr.split('://')[1];
   const encodedUrl = encodeURIComponent(url);
-  const uuidStr = crypto.randomUUID().replace(/-/g, "");
-  const formattedDate = (new Date()).toUTCString().replace(/GMT/, "").trim() + " GMT";
+  const uuidStr = crypto.randomUUID().replace(/-/g, '');
+  const formattedDate =
+    new Date().toUTCString().replace(/GMT/, '').trim() + ' GMT';
 
   // 构建待签名字符串
-  const bytesToSign = `MSTranslatorAndroidApp${encodedUrl}${formattedDate}${uuidStr}`.toLowerCase();
+  const bytesToSign =
+    `MSTranslatorAndroidApp${encodedUrl}${formattedDate}${uuidStr}`.toLowerCase();
 
   // 解码密钥并生成 HMAC 签名
-  const decode = base64ToBytes("oik6PdDdMnOXemTbwvMn9de/h9lFnfBaCWbGMMZqqoSaQaqUOqjVGm5NqsmjcBI1x+sS9ugjB55HEJWRiFXYFw==");
+  const decode = base64ToBytes(
+    'oik6PdDdMnOXemTbwvMn9de/h9lFnfBaCWbGMMZqqoSaQaqUOqjVGm5NqsmjcBI1x+sS9ugjB55HEJWRiFXYFw=='
+  );
   const signData = await hmacSha256(decode, bytesToSign);
   const signBase64 = bytesToBase64(signData);
 
@@ -425,13 +470,17 @@ async function sign(urlStr) {
  */
 async function hmacSha256(key, data) {
   const cryptoKey = await crypto.subtle.importKey(
-    "raw",
+    'raw',
     key,
-    { name: "HMAC", hash: { name: "SHA-256" } },
+    { name: 'HMAC', hash: { name: 'SHA-256' } },
     false,
-    ["sign"]
+    ['sign']
   );
-  const signature = await crypto.subtle.sign("HMAC", cryptoKey, new TextEncoder().encode(data));
+  const signature = await crypto.subtle.sign(
+    'HMAC',
+    cryptoKey,
+    new TextEncoder().encode(data)
+  );
   return new Uint8Array(signature);
 }
 
@@ -454,7 +503,6 @@ function bytesToBase64(bytes) {
   return btoa(String.fromCharCode.apply(null, bytes));
 }
 
-
 // =================================================================================
 // 通用工具函数
 // =================================================================================
@@ -470,9 +518,10 @@ function bytesToBase64(bytes) {
  */
 function getSsml(text, voiceName, rate, pitch, style) {
   // 先保护 break 标签
-  const breakTagRegex = /<break\s+time="[^"]*"\s*\/?>|<break\s*\/?>|<break\s+time='[^']*'\s*\/?>/gi;
+  const breakTagRegex =
+    /<break\s+time="[^"]*"\s*\/?>|<break\s*\/?>|<break\s+time='[^']*'\s*\/?>/gi;
   const breakTags = [];
-  let processedText = text.replace(breakTagRegex, (match) => {
+  let processedText = text.replace(breakTagRegex, match => {
     const placeholder = `__BREAK_TAG_${breakTags.length}__`;
     breakTags.push(match);
     return placeholder;
@@ -509,7 +558,7 @@ function smartChunkText(text, maxChunkLength) {
   if (!text) return [];
 
   const chunks = [];
-  let currentChunk = "";
+  let currentChunk = '';
 
   // 按句子分隔符分割（支持中英文标点）
   const sentences = text.split(/([.?!,;:\n。？！，；：\r]+)/g);
@@ -617,14 +666,14 @@ function cleanText(text, options) {
  * @param {string} type - 错误类型
  * @returns {Response} 错误响应对象
  */
-function errorResponse(message, status, code, type = "api_error") {
+function errorResponse(message, status, code, type = 'api_error') {
   return new Response(
     JSON.stringify({
       error: { message, type, param: null, code }
     }),
     {
       status,
-      headers: { "Content-Type": "application/json", ...makeCORSHeaders() }
+      headers: { 'Content-Type': 'application/json', ...makeCORSHeaders() }
     }
   );
 }
@@ -634,12 +683,12 @@ function errorResponse(message, status, code, type = "api_error") {
  * @param {string} extraHeaders - 额外的允许头部
  * @returns {Object} CORS 头部对象
  */
-function makeCORSHeaders(extraHeaders = "Content-Type, Authorization") {
+function makeCORSHeaders(extraHeaders = 'Content-Type, Authorization') {
   return {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": extraHeaders,
-    "Access-Control-Max-Age": "86400"
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Headers': extraHeaders,
+    'Access-Control-Max-Age': '86400'
   };
 }
 
@@ -881,6 +930,7 @@ function getHtmlContent() {
       color: var(--text);
       transition: border-color 0.18s, box-shadow 0.18s;
       -webkit-appearance: none;
+      appearance: none;
     }
 
     input[type="text"]:focus,
@@ -898,7 +948,7 @@ function getHtmlContent() {
 
     textarea {
       resize: vertical;
-      min-height: 130px;
+      min-height: 164px;
       line-height: 1.65;
     }
 
@@ -973,7 +1023,7 @@ function getHtmlContent() {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      gap: 0.75rem;
+      gap: 1.25rem;
     }
 
     .char-counter {
@@ -1393,8 +1443,8 @@ function getHtmlContent() {
                 <option value="zh-CN-XiaoyanNeural">晓颜（专业）</option>
                 <option value="zh-CN-XiaoqiuNeural">晓秋（沉稳）</option>
                 <option value="zh-CN-XiaozhenNeural">晓甄（激情）</option>
-                <option value="zh-CN-XiaomengNeural">晓梦</option>
-                <option value="zh-CN-XiaomoNeural">晓墨</option>
+                <option value="zh-CN-XiaomengNeural">晓梦（甜美清新）</option>
+                <option value="zh-CN-XiaomoNeural">晓墨（多变表现力）</option>
                 <option value="zh-CN-XiaoruiNeural">晓睿（年长）</option>
                 <option value="zh-CN-XiaoshuangNeural">晓双（儿童）</option>
                 <option value="zh-CN-XiaoyouNeural">晓悠（儿童）</option>
@@ -1404,11 +1454,11 @@ function getHtmlContent() {
                 <option value="zh-CN-YunyangNeural">云扬（专业 · 最热门）</option>
                 <option value="zh-CN-YunxiNeural">云希（阳光）</option>
                 <option value="zh-CN-YunjianNeural">云健（激情）</option>
-                <option value="zh-CN-YunjieNeural">云杰</option>
-                <option value="zh-CN-YunfengNeural">云枫</option>
-                <option value="zh-CN-YunhaoNeural">云皓</option>
+                <option value="zh-CN-YunjieNeural">云杰（自然随性）</option>
+                <option value="zh-CN-YunfengNeural">云枫（沉稳磁性）</option>
+                <option value="zh-CN-YunhaoNeural">云皓（阳光活力）</option>
                 <option value="zh-CN-YunzeNeural">云泽（浑厚）</option>
-                <option value="zh-CN-YunyeNeural">云野</option>
+                <option value="zh-CN-YunyeNeural">云野（豪迈粗犷）</option>
                 <option value="zh-CN-YunxiaNeural">云夏（儿童）</option>
               </optgroup>
               <!-- 地方方言 -->
@@ -1565,7 +1615,7 @@ function getHtmlContent() {
   </div>
 
   <!-- Vue 3 CDN (unpkg 在国内一般可访问) -->
-  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <script src="https://unpkg.com/vue@3.5.33/dist/vue.global.prod.js"></script>
 
   <script>
     const { createApp } = Vue;
