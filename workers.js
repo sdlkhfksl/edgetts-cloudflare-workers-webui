@@ -696,7 +696,7 @@ function makeCORSHeaders(extraHeaders = 'Content-Type, Authorization') {
  * 获取 HTML 内容
  * @returns {string} HTML 页面内容
  */
-function getHtmlContent() {
+function getHtmlContent() { 
   return `<!DOCTYPE html>
 <html lang="zh-Hans">
 
